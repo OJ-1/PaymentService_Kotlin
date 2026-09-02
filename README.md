@@ -2,6 +2,8 @@
 
 **V1.0.0 — Initial Release**
 
+Additional documentation can be found in the PaymentService\documentation directory
+
 ---
 
 # Overview

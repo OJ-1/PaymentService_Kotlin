@@ -1,0 +1,194 @@
+services:
+
+  # ========================================================= PAYMENT SERVICE \/
+
+  payment-service:
+
+    build:
+      context: ..
+      dockerfile: Dockerfile
+
+    container_name: payment-service
+
+    security_opt:
+      - seccomp=unconfined
+
+    environment:
+      # PostgreSQL
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+
+      # TigerBeetle
+      TIGERBEETLE_HOST: 172.20.0.2
+      TIGERBEETLE_PORT: 3000
+
+      # Restate
+      RESTATE_HOST: restate
+      RESTATE_PORT: 8080
+
+    ports:
+      - "8080:8080"
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+      tigerbeetle:
+        condition: service_started
+
+      restate:
+        condition: service_started
+
+    restart: unless-stopped
+
+    networks:
+      - payment-network
+
+  # ========================================================= PAYMENT SERVICE /\
+
+  # ========================================================= TIGERBEETLE \/
+
+  tigerbeetle:
+
+    image: ghcr.io/tigerbeetle/tigerbeetle:0.17.8
+    container_name: tigerbeetle
+
+    command: >
+      start
+      --addresses=0.0.0.0:3000
+      /data/0_0.tigerbeetle
+
+    ports:
+      - "3000:3000"
+
+    volumes:
+      - ./tigerbeetle/data:/data
+
+    security_opt:
+      - seccomp=unconfined
+
+    restart: unless-stopped
+
+    networks:
+      payment-network:
+        ipv4_address: 172.20.0.2
+
+  # ========================================================= TIGERBEETLE /\
+
+  # ========================================================= POSTGRESQL \/
+
+  postgres:
+
+    image: postgres:17
+    container_name: postgres
+
+    environment:
+      POSTGRES_DB: payments
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+
+    ports:
+      - "5433:5432"
+
+    volumes:
+      - ./postgres/data:/var/lib/postgresql/data
+
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U postgres -d payments"
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    restart: unless-stopped
+
+    networks:
+      - payment-network
+
+  # ========================================================= POSTGRESQL /\
+
+  # ========================================================= RESTATE \/
+
+  restate:
+
+    image: restatedev/restate:latest
+    container_name: restate
+
+    environment:
+      RESTATE_NODE_NAME: restate-1
+
+    ports:
+      - "9072:8080"
+      - "9070:9070"
+
+    volumes:
+      - ./restate/data:/restate-data
+
+    restart: unless-stopped
+
+    networks:
+      - payment-network
+
+  # =========================================================  RESTATE /\
+
+  # ========================================================= RESTATE DEPLOYMENT REGISTRATION \/
+
+  restate-register:
+
+    image: curlimages/curl:latest
+    container_name: restate-register
+
+    depends_on:
+      payment-service:
+        condition: service_started
+
+      restate:
+        condition: service_started
+
+    command: >
+      sh -c '
+        echo "Waiting 10 seconds before attempting deployment...";
+        sleep 10;
+
+        while true; do
+
+          echo "Registering Payment Service with Restate...";
+
+          curl -sS -f -X POST \
+            http://restate:9070/deployments \
+            -H "Content-Type: application/json" \
+            -d "{\"uri\":\"http://payment-service:9090\"}"
+
+          if [ $? -eq 0 ]; then
+            echo "";
+            echo "Restate deployment registration complete.";
+            exit 0;
+          fi;
+
+          echo "";
+          echo "Deployment registration failed. Retrying in 5 seconds...";
+          sleep 5;
+
+        done;
+      '
+
+    restart: "no"
+
+    networks:
+      - payment-network
+
+    # ========================================================= RESTATE DEPLOYMENT REGISTRATION /\
+
+# ========================================================= CUSTOM DOCKER NETWORK \/
+
+networks:
+  payment-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
+
+# ========================================================= CUSTOM DOCKER NETWORK /\

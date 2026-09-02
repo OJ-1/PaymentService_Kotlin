@@ -1,0 +1,19 @@
+# Build and Gradle
+.gradle/
+build/
+
+# IDE
+.idea/
+*.iml
+
+# Git
+.git/
+.gitignore
+
+# Runtime data
+docker/postgres/data/
+docker/tigerbeetle/data/
+docker/restate/data/
+
+# Documentation
+README.md
